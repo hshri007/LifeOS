@@ -1,0 +1,22 @@
+{
+  "name": "lifeos",
+  "private": true,
+  "version": "0.1.0",
+  "description": "LifeOS - privacy-first AI personal operations platform (MVP: document intelligence + obligation engine)",
+  "workspaces": [
+    "packages/*",
+    "services/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w services/api",
+    "dev:web": "npm run dev -w apps/web",
+    "typecheck": "tsc --noEmit -p packages/types && tsc --noEmit -p services/api && tsc --noEmit -p apps/web",
+    "test": "npm run test -w services/api",
+    "seed": "npm run seed -w services/api"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.5.4"
+  }
+}
