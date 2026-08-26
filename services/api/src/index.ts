@@ -7,6 +7,7 @@
  */
 import express from 'express';
 import cors from 'cors';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
 import { config } from './config';

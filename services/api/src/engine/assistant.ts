@@ -14,7 +14,7 @@ import {
 } from './obligations';
 import { buildBriefingItems } from './briefing';
 
-function sourcesFrom(items: Array<{ document_id: string | null; title: string }>): AssistantSource[] {
+function sourcesFrom(items: Array<{ document_id?: string | null; title: string }>): AssistantSource[] {
   const byDoc = new Map<string, AssistantSource>();
   for (const it of items) {
     if (!it.document_id) continue;
@@ -86,7 +86,7 @@ export function answerQuestion(userId: string, question: string): AssistantAnswe
         answer:
           `You have ${subs.length} active subscription(s), roughly ${formatMoney(monthlyCost(subs))}/month combined:\n${lines.join('\n')}`,
         items: [],
-        sources: sourcesFrom(subs),
+        sources: sourcesFrom(subs.map((s) => ({ document_id: s.document_id, title: s.merchant }))),
         grounded: true,
       };
     }

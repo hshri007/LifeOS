@@ -91,15 +91,27 @@ const parseMonths = (v: string): string => {
 type Extractor = (ctx: ExtractContext) => ExtractedField[];
 
 const EXTRACTORS: Partial<Record<DocumentCategory, Extractor>> = {
-  insurance: (c) =>
-    [
+  insurance: (c) => {
+    const fields = [
       captureField(/(?:insurer|insurance provider|company)\s*[:\-]\s*([A-Z][A-Za-z&.' ]{2,40})/, c, 'provider'),
       captureField(/\bpolicy\s*(?:no\.?|number|#)?\s*[:\-#]?\s*([A-Z0-9][A-Z0-9\-\/]{4,24})/i, c, 'policy_number', { confidence: 0.85 }),
       labeledMoney(/premium(?:\s*amount|\s*\(?incl[^)]*\)?)?\s*[:\-]?/i, c, 'premium_amount'),
       labeledDate(/(?:policy period|period of insurance|valid from|commencing|start date|cover from)\s*[:\-]?/i, c, 'start_date'),
       labeledDate(/(?:valid (?:till|until|upto|up to)|expiry|expires? on|end date|cover up to)\s*[:\-]?/i, c, 'end_date'),
       captureField(/(?:insured name|insured)\s*[:\-]\s*([^\n]{2,60})/i, c, 'insured_name'),
-    ].filter(Boolean) as ExtractedField[],
+    ].filter(Boolean) as ExtractedField[];
+
+    // Explicit "Period ...: From <date> to <date>" layout common in Indian policies.
+    const pm = /(?:period of insurance|policy period|policy period|cover period)[^\n:]*:\s*(?:from\s+)?(.+?)\s+(?:to|till|until)\s+(.+?)\s*$/im.exec(c.text);
+    if (pm) {
+      const abs = (idx: number): number => pm.index + pm[0].indexOf(idx === 1 ? pm[1] : pm[2]);
+      const s = findDates(pm[1])[0];
+      const e = findDates(pm[2])[0];
+      if (s) fields.push({ field: 'start_date', value: s.raw, normalizedValue: s.iso, confidence: 0.95, span: [abs(1), abs(1) + s.raw.length], requiresConfirmation: true });
+      if (e) fields.push({ field: 'end_date', value: e.raw, normalizedValue: e.iso, confidence: 0.95, span: [abs(2), abs(2) + e.raw.length], requiresConfirmation: true });
+    }
+    return fields;
+  },
 
   purchase_invoice: (c) =>
     [
@@ -139,7 +151,9 @@ const EXTRACTORS: Partial<Record<DocumentCategory, Extractor>> = {
       captureField(/\b((?:[A-Z]{2}[\s\-]?\d{1,2}[\s\-]?[A-Z]{1,3}[\s\-]?\d{4}))\b/, c, 'registration_number', { confidence: 0.9 }),
       captureField(/(?:make\s*(?:\/|and)?\s*model|vehicle(?:\s*model)?)\s*[:\-]\s*([^\n]{2,60})/i, c, 'make_model'),
       labeledDate(/puc[^\n]{0,40}/i, c, 'puc_expiry'),
-      labeledDate(/(?:insurance valid|insurance expiry|policy expiry|valid (?:till|until))\s*[:\-]?/i, c, 'insurance_expiry'),
+      // Must mention insurance/policy explicitly — a bare "Valid Till" (e.g., on
+      // PUC certificates) must NOT be mistaken for insurance expiry.
+      labeledDate(/(?:insurance\s*(?:valid|expiry|expires?)|policy\s*(?:expiry|valid))[^\n:]{0,12}[:\-]?/i, c, 'insurance_expiry'),
       labeledDate(/(?:next service|service due|next service due)\s*(?:date)?\s*[:\-]?/i, c, 'next_service_date'),
       captureField(/odometer[^\d]{0,12}(\d{1,7})\s*km/i, c, 'odometer_km', { normalize: (v) => v }),
     ].filter(Boolean) as ExtractedField[],

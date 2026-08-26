@@ -105,9 +105,11 @@ export function listObligations(ownerId: string, filter: ObligationFilter = {}):
   }
   sql += ' ORDER BY due_at ASC';
   const rows = db.prepare(sql).all(...params) as Array<Record<string, unknown>>;
-  let out = rows.map(rowToObligation);
   const now = new Date();
-  out = out.map((o) => ({ ...o, overdue: o.status === 'open' && new Date(o.due_at) < now }));
+  let out: Array<Obligation & { overdue: boolean }> = rows.map((r) => {
+    const o = rowToObligation(r);
+    return { ...o, overdue: o.status === 'open' && new Date(o.due_at) < now };
+  });
   if (filter.withinDays !== undefined) {
     const horizon = addDays(now, filter.withinDays).toISOString();
     out = out.filter((o) => o.due_at <= horizon);

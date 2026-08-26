@@ -34,7 +34,7 @@ function pad(n: number): string {
 interface Rule {
   re: RegExp;
   confidence: number;
-  build: (m: RegExpExecArray) => { iso: string } | null;
+  build: (m: RegExpExecArray) => { iso: string; confidenceOverride?: number } | null;
 }
 
 /** Ordered by specificity/priority; first matching rule wins for a given span. */
@@ -85,7 +85,7 @@ const RULES: Rule[] = [
         [d, mo] = [mo, d]; // was MM/DD
         conf = 0.75;
       }
-      return validUTC(y, mo, d) ? { iso: `${y}-${pad(mo)}-${pad(d)}` } : null;
+      return validUTC(y, mo, d) ? { iso: `${y}-${pad(mo)}-${pad(d)}`, confidenceOverride: conf } : null;
     },
   },
 ];
@@ -106,7 +106,7 @@ export function findDates(text: string): ParsedDate[] {
       // Skip if overlapping an existing higher/equal confidence match.
       const overlaps = out.some((p) => start < p.span[1] && end > p.span[0]);
       if (overlaps) continue;
-      out.push({ iso: built.iso, confidence: rule.confidence, span: [start, end], raw: m[0] });
+      out.push({ iso: built.iso, confidence: built.confidenceOverride ?? rule.confidence, span: [start, end], raw: m[0] });
     }
   }
   return out.sort((a, b) => a.span[0] - b.span[0]);
