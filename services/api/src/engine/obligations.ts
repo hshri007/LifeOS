@@ -138,6 +138,8 @@ export function updateObligationStatus(ownerId: string, id: string, patch: {
   title?: string;
   detail?: string;
   priority?: Priority;
+  recurrence?: Recurrence;
+  type?: ObligationType;
   snoozedUntil?: string | null;
 }): Obligation | null {
   const existing = getObligation(ownerId, id);
@@ -155,14 +157,22 @@ export function updateObligationStatus(ownerId: string, id: string, patch: {
   const completedAt = status === 'completed' ? nowISO() : null;
   db.prepare(
     `UPDATE obligations SET status = ?, due_at = COALESCE(?, due_at), title = COALESCE(?, title),
-     detail = COALESCE(?, detail), priority = COALESCE(?, priority), snoozed_until = ?,
-     completed_at = ?, updated_at = ? WHERE id = ?`
+     detail = COALESCE(?, detail), priority = COALESCE(?, priority),
+     recurrence = COALESCE(?, recurrence), type = COALESCE(?, type),
+     snoozed_until = ?, completed_at = ?, updated_at = ? WHERE id = ?`
   ).run(
     status, patch.dueAt ?? null, patch.title ?? null, patch.detail ?? null, patch.priority ?? null,
+    patch.recurrence ?? null, patch.type ?? null,
     patch.snoozedUntil !== undefined ? patch.snoozedUntil : existing.snoozed_until,
     completedAt, nowISO(), id
   );
   return getObligation(ownerId, id);
+}
+
+/** Hard-delete an obligation (FR-007 delete). */
+export function deleteObligation(ownerId: string, id: string): boolean {
+  const res = db.prepare('DELETE FROM obligations WHERE id = ? AND owner_id = ?').run(id, ownerId);
+  return res.changes > 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -187,6 +197,24 @@ export function listAssets(ownerId: string): Asset[] {
     metadata: parseJSON<Record<string, unknown>>(r.metadata, {}),
     created_at: String(r.created_at),
   }));
+}
+
+/** Delete an asset along with obligations/events that reference it (sets null). */
+export function deleteAsset(ownerId: string, id: string): boolean {
+  db.prepare('UPDATE obligations SET asset_id = NULL WHERE asset_id = ? AND owner_id = ?').run(id, ownerId);
+  const res = db.prepare('DELETE FROM assets WHERE id = ? AND owner_id = ?').run(id, ownerId);
+  return res.changes > 0;
+}
+
+export function updateAsset(ownerId: string, id: string, patch: { name?: string; type?: AssetType; metadata?: Record<string, unknown> }): Asset | null {
+  const existing = listAssets(ownerId).find((a) => a.id === id);
+  if (!existing) return null;
+  const name = patch.name?.trim() || existing.name;
+  const type = patch.type ?? existing.type;
+  const metadata = patch.metadata ? { ...existing.metadata, ...patch.metadata } : existing.metadata;
+  db.prepare('UPDATE assets SET name = ?, type = ?, metadata = ? WHERE id = ? AND owner_id = ?')
+    .run(name, type, JSON.stringify(metadata), id, ownerId);
+  return { ...existing, name, type, metadata };
 }
 
 export function upsertSubscription(s: Omit<Subscription, 'id' | 'created_at'>): Subscription {
@@ -231,6 +259,31 @@ export function listSubscriptions(ownerId: string): Subscription[] {
     document_id: r.document_id ? String(r.document_id) : null,
     created_at: String(r.created_at),
   }));
+}
+
+/** Delete a subscription and its linked renewal obligation (both owned by the user). */
+export function deleteSubscription(ownerId: string, id: string): boolean {
+  const sub = listSubscriptions(ownerId).find((s) => s.id === id);
+  if (!sub) return false;
+  db.prepare("UPDATE subscriptions SET status = 'cancelled' WHERE id = ? AND owner_id = ?").run(id, ownerId);
+  db.prepare('DELETE FROM obligations WHERE owner_id = ? AND type = ? AND title LIKE ?')
+    .run(ownerId, 'renewal', `${sub.merchant} renews%`);
+  return true;
+}
+
+export function updateSubscription(ownerId: string, id: string, patch: { merchant?: string; amount?: number; cadence?: Cadence; renewal_at?: string; currency?: string }): Subscription | null {
+  const existing = listSubscriptions(ownerId).find((s) => s.id === id);
+  if (!existing) return null;
+  db.prepare('UPDATE subscriptions SET merchant = ?, amount = ?, cadence = ?, renewal_at = ?, currency = ? WHERE id = ? AND owner_id = ?')
+    .run(
+      patch.merchant ?? existing.merchant,
+      patch.amount ?? existing.amount,
+      patch.cadence ?? existing.cadence,
+      patch.renewal_at ?? existing.renewal_at,
+      patch.currency ?? existing.currency,
+      id, ownerId
+    );
+  return listSubscriptions(ownerId).find((s) => s.id === id) ?? null;
 }
 
 export function monthlyCost(subs: Subscription[]): number {

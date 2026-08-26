@@ -10,6 +10,7 @@ import { db } from '../db';
 import { config } from '../config';
 import { buildDashboard } from '../engine/briefing';
 import { listNotifications, markNotificationsRead, runReminderTick } from '../engine/reminders';
+import { createRecordsFromManual } from '../engine/manual';
 import { ingestText } from '../extraction/pipeline';
 import { audit } from '../engine/tools';
 import { nowISO, sha256, uuid } from '../util';
@@ -26,6 +27,9 @@ miscRouter.get('/dashboard', (req: AuthedRequest, res) => {
 /* --------------------------- notifications --------------------------- */
 
 miscRouter.get('/notifications', (req: AuthedRequest, res) => {
+  // Self-maintaining: each poll runs one reminder pass so in-app notifications
+  // materialize without needing a separate worker process in the MVP.
+  runReminderTick();
   res.json({ notifications: listNotifications(req.userId!, req.query.unread === '1') });
 });
 
@@ -57,13 +61,14 @@ miscRouter.get('/audit', (req: AuthedRequest, res) => {
 
 /* -------------------------- consent center --------------------------- */
 
-const PROVIDER_CATALOG: Record<string, { name: string; dataAccessed: string; whyNeeded: string; scopes: string[]; risk: string }> = {
+const PROVIDER_CATALOG: Record<string, { name: string; dataAccessed: string; whyNeeded: string; scopes: string[]; risk: string; oauth: boolean }> = {
   gmail_readonly: {
     name: 'Gmail (read-only receipts)',
     dataAccessed: 'Emails matching receipt/bill/renewal filters',
     whyNeeded: 'Discover bills, renewals and subscriptions automatically',
     scopes: ['gmail.readonly'],
     risk: 'High privacy',
+    oauth: true,
   },
   google_calendar: {
     name: 'Google Calendar',
@@ -71,6 +76,7 @@ const PROVIDER_CATALOG: Record<string, { name: string; dataAccessed: string; why
     whyNeeded: 'Travel readiness and appointment conflict checks',
     scopes: ['calendar.events.readonly'],
     risk: 'Medium',
+    oauth: true,
   },
   email_forwarding: {
     name: 'Email forwarding address',
@@ -78,12 +84,16 @@ const PROVIDER_CATALOG: Record<string, { name: string; dataAccessed: string; why
     whyNeeded: 'Lowest-risk ingestion path for bills and policies (MVP default)',
     scopes: ['forwarded_email'],
     risk: 'Low',
+    oauth: false,
   },
 };
+
+const oauthConfigured = (): boolean => Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
 
 miscRouter.get('/consent', (req: AuthedRequest, res) => {
   const rows = db.prepare('SELECT * FROM integrations WHERE owner_id = ?').all(req.userId!) as Array<Record<string, unknown>>;
   res.json({
+    oauthConfigured: oauthConfigured(),
     catalog: Object.entries(PROVIDER_CATALOG).map(([key, v]) => ({ key, ...v })),
     connections: rows.map((r) => ({
       id: String(r.id),
@@ -103,12 +113,46 @@ miscRouter.post('/consent/connect', (req: AuthedRequest, res) => {
     res.status(400).json({ error: 'Unknown provider.' });
     return;
   }
+  // Trust before growth (Core Principles): never fake a connection. OAuth
+  // providers require real Google OAuth credentials; without them the API
+  // refuses honestly instead of flipping a flag that does nothing.
+  if (meta.oauth && !oauthConfigured()) {
+    res.status(501).json({
+      error: `${meta.name} requires Google OAuth to be configured (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET). Until then, use the email forwarding path — it is fully functional.`,
+      code: 'oauth_not_configured',
+    });
+    return;
+  }
   db.prepare(`INSERT INTO integrations (id, owner_id, provider, scopes, status, created_at)
               VALUES (?, ?, ?, ?, 'connected', ?)
               ON CONFLICT(owner_id, provider) DO UPDATE SET status = 'connected'`)
     .run(uuid(), req.userId!, provider, JSON.stringify(meta.scopes), nowISO());
   audit(req.userId!, 'consent.connected', 'integration', provider, { scopes: meta.scopes }, req.ip);
   res.json({ ok: true, provider, scopes: meta.scopes });
+});
+
+/* ------------------------- manual record entry ------------------------- */
+
+/** Direct detail entry (no document) — e.g. typing PUC expiry by hand. */
+miscRouter.post('/records/manual', (req: AuthedRequest, res) => {
+  const category = String(req.body?.category ?? '');
+  const title = String(req.body?.title ?? '').slice(0, 200) || 'Manual entry';
+  const fields = (req.body?.fields ?? {}) as Record<string, unknown>;
+  if (typeof fields !== 'object' || fields === null) {
+    res.status(400).json({ error: 'fields object required.' });
+    return;
+  }
+  const clean = Object.fromEntries(
+    Object.entries(fields)
+      .filter(([, v]) => v !== '' && v !== null && v !== undefined)
+      .map(([k, v]) => [k, String(v).slice(0, 300)])
+  );
+  try {
+    const result = createRecordsFromManual(req.userId!, category, title, clean);
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(400).json({ error: String(err instanceof Error ? err.message : err) });
+  }
 });
 
 miscRouter.post('/consent/:provider/revoke', (req: AuthedRequest, res) => {

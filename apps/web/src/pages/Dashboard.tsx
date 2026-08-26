@@ -19,11 +19,7 @@ function OblRow({ o, onDone }: { o: ObligationRow; onDone?: (id: string) => void
       </div>
       <span className={`chip ${o.priority}`}>{o.priority}</span>
       <span className="obl-due">{dueLabel(o.due_at)}</span>
-      {onDone && (
-        <button className="btn small" onClick={() => onDone(o.id)} title="Mark done">
-          ✓
-        </button>
-      )}
+      {onDone && <button className="btn small" onClick={() => onDone(o.id)} title="Mark done">✓</button>}
     </div>
   );
 }
@@ -50,13 +46,42 @@ export default function Dashboard() {
   if (!data) return <div className="empty">Loading your briefing…</div>;
 
   const fmt = new Intl.NumberFormat('en-IN', { style: 'currency', currency: data.money.currency, maximumFractionDigits: 0 });
+  const dueToday = data.today.length;
+  const dueWeek = data.thisWeek.length;
+  const attention = Math.max(dueToday, countOpen(data));
 
   return (
     <>
       <h1 className="page-title">Good to see you.</h1>
       <p className="page-sub">Here is what matters right now — and why.</p>
+      <div className="dash-actions">
+        <Link to="/records" className="btn primary">＋ Add record</Link>
+        <Link to="/documents" className="btn">▤ Upload document</Link>
+      </div>
 
-      <section className="section">
+      <div className="stat-grid">
+        <div className="stat-tile accent">
+          <div className="stat-label">Needs attention</div>
+          <div className="stat-value">{attention}</div>
+          <div className="stat-caption">{dueToday > 0 ? `${dueToday} due today` : 'All clear today'}</div>
+        </div>
+        <div className="stat-tile">
+          <div className="stat-label">This week</div>
+          <div className="stat-value">{dueWeek}</div>
+          <div className="stat-caption">upcoming deadlines</div>
+        </div>
+        <div className="stat-tile">
+          <div className="stat-label">Recurring / mo</div>
+          <div className="stat-value">{fmt.format(data.money.monthlyRecurringEstimate)}</div>
+          <div className="stat-caption">{data.money.subscriptions.length} subscriptions</div>
+        </div>
+        <div className="stat-tile">
+          <div className="stat-label">Assets tracked</div>
+          <div className="stat-value">{data.assets.length}</div>
+          <div className="stat-caption">vehicles · devices · more</div>
+        </div>
+      </div>
+<section className="section">
         <div className="card briefing">
           <h3>AI Briefing</h3>
           <div className="briefing-summary">{data.briefing.summary}</div>
@@ -126,10 +151,14 @@ export default function Dashboard() {
                 <div className="muted">{a.type}{a.metadata['registration_number'] ? ` · ${String(a.metadata['registration_number'])}` : ''}</div>
               </div>
             ))}
-            {data.assets.length === 0 && <div className="muted">Upload an invoice or RC to create your first asset.</div>}
+            {data.assets.length === 0 && <div className="muted">Add a record or upload a document to create your first asset.</div>}
           </div>
         </div>
       </section>
     </>
   );
+}
+
+function countOpen(data: DashboardData): number {
+  return data.today.length + data.thisWeek.length + data.thisMonth.length;
 }

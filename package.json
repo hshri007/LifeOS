@@ -9,6 +9,7 @@
     "apps/*"
   ],
   "scripts": {
+    "dev": "node scripts/dev.mjs",
     "dev:api": "npm run dev -w services/api",
     "dev:web": "npm run dev -w apps/web",
     "typecheck": "tsc --noEmit -p packages/types && tsc --noEmit -p services/api && tsc --noEmit -p apps/web",

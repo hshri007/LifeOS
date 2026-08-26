@@ -40,6 +40,27 @@ export const api = {
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };
 
+/** Authenticated file download (export previously broke: window.open drops the auth header). */
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`/api${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) throw new ApiError(res.status, `Download failed (${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** Tiny global toast bus — Shell renders the toaster, any page can fire events. */
+export function toast(message: string, kind: 'ok' | 'err' = 'ok'): void {
+  window.dispatchEvent(new CustomEvent('lifeos-toast', { detail: { message, kind, id: Date.now() } }));
+}
+
 /* ------------------------------ types ------------------------------ */
 
 export interface ObligationRow {
@@ -94,4 +115,35 @@ export interface AssistantAnswerData {
   intent: string;
   answer: string;
   sources: Array<{ documentId: string; title: string }>;
+}
+
+export interface NotificationRow {
+  id: string;
+  obligation_id: string | null;
+  kind: string;
+  title: string;
+  body: string;
+  scheduled_for: string;
+  read_at: string | null;
+}
+
+export interface MeUser {
+  id: string;
+  email: string;
+  email_verified?: number;
+  timezone?: string;
+  locale?: string;
+}
+
+export interface ManualResult {
+  assets: Array<{ id: string; name: string; type: string }>;
+  subscriptions: Array<{ id: string; merchant: string }>;
+  events: Array<{ id: string; title: string }>;
+  obligations: Array<{ id: string; title: string; due_at: string }>;
+}
+
+export interface ConsentData {
+  oauthConfigured: boolean;
+  catalog: Array<{ key: string; name: string; dataAccessed: string; whyNeeded: string; scopes: string[]; risk: string; oauth: boolean }>;
+  connections: Array<{ id: string; provider: string; status: string; scopes: string[] }>;
 }

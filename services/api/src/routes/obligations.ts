@@ -5,7 +5,7 @@
 import { Router } from 'express';
 import { CreateObligationSchema, UpdateObligationSchema } from '@lifeos/types';
 import { requireAuth, type AuthedRequest } from '../auth';
-import { createObligation, getObligation, listObligations, updateObligationStatus, type ObligationFilter } from '../engine/obligations';
+import { createObligation, deleteObligation, getObligation, listObligations, updateObligationStatus, type ObligationFilter } from '../engine/obligations';
 import { audit } from '../engine/tools';
 
 export const obligationsRouter = Router();
@@ -73,6 +73,8 @@ obligationsRouter.patch('/:id', (req: AuthedRequest, res) => {
     title: a.title,
     detail: a.detail,
     priority: a.priority,
+    recurrence: a.recurrence,
+    type: a.type,
     snoozedUntil,
   });
   if (!updated) {
@@ -81,4 +83,14 @@ obligationsRouter.patch('/:id', (req: AuthedRequest, res) => {
   }
   audit(req.userId!, `obligation.${a.action}`, 'obligation', updated.id, {}, req.ip);
   res.json({ obligation: { ...updated, overdue: updated.status === 'open' && new Date(updated.due_at) < new Date() } });
+});
+
+/** Hard-delete an obligation (FR-007). */
+obligationsRouter.delete('/:id', (req: AuthedRequest, res) => {
+  if (!deleteObligation(req.userId!, req.params.id)) {
+    res.status(404).json({ error: 'Obligation not found.' });
+    return;
+  }
+  audit(req.userId!, 'obligation.deleted', 'obligation', req.params.id, {}, req.ip);
+  res.json({ ok: true });
 });

@@ -14,6 +14,14 @@ import {
 } from './obligations';
 import { buildBriefingItems } from './briefing';
 
+/** Generic query stop-words — the fallback search ignores these. */
+const STOPWORDS = new Set([
+  'me', 'my', 'what', 'which', 'who', 'when', 'where', 'how', 'the', 'a', 'an',
+  'and', 'or', 'about', 'for', 'with', 'all', 'any', 'are', 'is', 'do', 'does',
+  'show', 'tell', 'give', 'list', 'find', 'from', 'this', 'that', 'have', 'has',
+  'there', 'those', 'date', 'dates', 'today', 'soon', 'expire', 'expires', 'hey', 'hi',
+]);
+
 function sourcesFrom(items: Array<{ document_id?: string | null; title: string }>): AssistantSource[] {
   const byDoc = new Map<string, AssistantSource>();
   for (const it of items) {
@@ -170,15 +178,51 @@ export function answerQuestion(userId: string, question: string): AssistantAnswe
       };
     }
 
-    default:
+    default: {
+      // General fallback: answer ANY question from the records the user has,
+      // so the assistant is genuinely useful beyond the canned intents. It
+      // searches obligations, subscriptions, assets and documents and frames
+      // what it found — without inventing facts outside the app's data.
+      const q = question.toLowerCase();
+      const keywords = q.split(/\W+/).map((w) => w.toLowerCase()).filter((w) => w.length > 2 && !STOPWORDS.has(w));
+      const matches: string[] = [];
+
+      const obls = listObligations(userId, { status: 'all' });
+      for (const o of obls) {
+        const hay = `${o.title} ${o.detail ?? ''} ${o.type}`.toLowerCase();
+        if (keywords.some((k) => hay.includes(k))) {
+          matches.push(`• ${o.title} — ${o.due_at.slice(0, 10)}${o.status === 'open' && new Date(o.due_at) < new Date() ? ' (overdue)' : ''}`);
+        }
+      }
+      const subs = listSubscriptions(userId);
+      for (const s of subs) {
+        const hay = `${s.merchant} ${s.category}`.toLowerCase();
+        if (keywords.some((k) => hay.includes(k))) {
+          matches.push(`• ${s.merchant} — ${formatMoney(s.amount, s.currency)}/${s.cadence}, renews ${s.renewal_at.slice(0, 10)}`);
+        }
+      }
+      const assets = listAssets(userId);
+      for (const a of assets) {
+        const hay = `${a.name} ${a.type} ${Object.values(a.metadata).join(' ')}`.toLowerCase();
+        if (keywords.some((k) => hay.includes(k))) {
+          matches.push(`• Asset: ${a.name} (${a.type})`);
+        }
+      }
+
+      const answer = matches.length > 0
+        ? `Here's what I found in your records for "${question}":\n${matches.slice(0, 8).join('\n')}` +
+          (matches.length > 8 ? `\n…and ${matches.length - 8} more. Ask me to narrow it down.` : '')
+        : `I couldn't find anything in your records matching "${question}". ` +
+          'You can ask me things like "What needs my attention?", "What expires soon?", "What subscriptions do I have?", "About my car", or just add a record and ask again.';
+
       return {
-        intent: 'unknown',
-        answer:
-          'I can answer questions grounded in your LifeOS records. Try: "What needs my attention?", "What expires in the next 60 days?", "What subscriptions do I have?", "Show everything related to my car", or "Which warranties are still active?"',
-        items: [],
+        intent,
+        answer,
+        items: itemsFrom(obls.filter((o) => keywords.some((k) => `${o.title} ${o.detail ?? ''}`.toLowerCase().includes(k))).slice(0, 8)),
         sources: [],
         grounded: true,
       };
+    }
   }
 }
 

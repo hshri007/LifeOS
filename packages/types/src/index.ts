@@ -386,6 +386,8 @@ export const UpdateObligationSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   detail: z.string().max(2000).optional(),
   priority: z.enum(PRIORITIES).optional(),
+  recurrence: z.enum(RECURRENCES).optional(),
+  type: z.enum(OBLIGATION_TYPES).optional(),
 });
 export type UpdateObligationInput = z.infer<typeof UpdateObligationSchema>;
 

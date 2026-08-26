@@ -17,6 +17,13 @@ export const db = new Database(config.dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+/** Lightweight column migration for existing databases. */
+try {
+  db.exec('ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0');
+} catch {
+  /* column already exists */
+}
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
   id            TEXT PRIMARY KEY,
@@ -213,6 +220,17 @@ CREATE TABLE IF NOT EXISTS notifications (
   created_at     TEXT NOT NULL,
   UNIQUE(user_id, dedupe_key)
 );
+
+-- OTP email verification codes (hashed; short-lived)
+CREATE TABLE IF NOT EXISTS email_verifications (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  code_hash  TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  attempts   INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_email_verif_user ON email_verifications(user_id);
 
 -- raw forwarded emails before processing (§4.2)
 CREATE TABLE IF NOT EXISTS ingest_emails (

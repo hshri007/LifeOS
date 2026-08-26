@@ -1,22 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api } from '../api';
-
-interface CatalogEntry {
-  key: string;
-  name: string;
-  dataAccessed: string;
-  whyNeeded: string;
-  scopes: string[];
-  risk: string;
-}
-
-interface Connection {
-  id: string;
-  provider: string;
-  status: string;
-  scopes: string[];
-}
+import { api, downloadFile, toast, type ConsentData } from '../api';
 
 interface AgentAction {
   id: string;
@@ -29,17 +13,15 @@ interface AgentAction {
 
 export default function Settings() {
   const navigate = useNavigate();
-  const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
-  const [connections, setConnections] = useState<Connection[]>([]);
+  const [consent, setConsent] = useState<ConsentData | null>(null);
   const [actions, setActions] = useState<AgentAction[]>([]);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   async function load() {
     try {
-      const consent = await api.get<{ catalog: CatalogEntry[]; connections: Connection[] }>('/consent');
-      setCatalog(consent.catalog);
-      setConnections(consent.connections);
+      setConsent(await api.get<ConsentData>('/consent'));
       setActions((await api.get<{ actions: AgentAction[] }>('/agent/actions')).actions);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
@@ -48,51 +30,67 @@ export default function Settings() {
   useEffect(() => { load(); }, []);
 
   async function connect(key: string) {
-    await api.post('/consent/connect', { provider: key });
-    load();
+    try {
+      await api.post('/consent/connect', { provider: key });
+      toast('Connected');
+      load();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Connect failed', 'err');
+    }
   }
   async function revoke(provider: string) {
     if (!window.confirm(`Revoke "${provider}"? LifeOS will stop accessing this data source.`)) return;
     await api.post(`/consent/${provider}/revoke`);
+    toast('Revoked');
     load();
   }
 
   async function exportData() {
-    // FR-014: full export of personal records.
-    window.open('/api/account/export', '_blank');
-    setNotice('Export downloaded.');
+    setExporting(true);
+    try {
+      // FR-014: authenticated export (previously broke because window.open drops the auth header).
+      await downloadFile('/account/export', 'lifeos-export.json');
+      toast('Export downloaded');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Export failed', 'err');
+    } finally {
+      setExporting(false);
+    }
   }
 
   async function deleteAccount() {
     if (!window.confirm('Delete your account and ALL personal data? This cannot be undone.')) return;
+    setDeleting(true);
     try {
       await api.post('/account/delete');
       localStorage.clear();
       navigate('/login');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Deletion failed');
+      setDeleting(false);
     }
   }
 
-  const statusOf = (key: string): Connection | undefined =>
-    connections.find((c) => c.provider === key && c.status === 'connected');
+  const statusOf = (key: string) => consent?.connections.find((c) => c.provider === key && c.status === 'connected');
 
   return (
     <>
       <h1 className="page-title">Settings</h1>
       <p className="page-sub">Consent is granular — every integration shows what it accesses and why (§4.6).</p>
       {error && <div className="error-box">{error}</div>}
-      {notice && <div className="info-box">{notice}</div>}
 
       <div className="card section">
         <h3>Consent center — integrations</h3>
-        {catalog.map((c) => {
+        {!consent ? <div className="empty">Loading…</div> : consent.catalog.map((c) => {
           const conn = statusOf(c.key);
           return (
             <div key={c.key} className="obl-row">
               <div className="obl-main">
                 <div className="obl-title">{c.name}</div>
                 <div className="muted">Accesses: {c.dataAccessed} · Why: {c.whyNeeded} · Risk: {c.risk}</div>
+                {c.oauth && !consent.oauthConfigured && (
+                  <div className="muted oauth-note">🔒 Requires Google OAuth setup — not yet configured, so this stays off.</div>
+                )}
               </div>
               {conn ? (
                 <>
@@ -100,11 +98,16 @@ export default function Settings() {
                   <button className="btn small danger" onClick={() => revoke(c.key)}>Revoke</button>
                 </>
               ) : (
-                <button className="btn small" onClick={() => connect(c.key)}>Connect</button>
+                <button className="btn small" onClick={() => connect(c.key)} disabled={c.oauth && !consent.oauthConfigured}>
+                  Connect
+                </button>
               )}
             </div>
           );
         })}
+        <p className="muted" style={{ marginTop: 10 }}>
+          If you authenticated with Gmail it only happened through Google's real OAuth screen — the app never silently "connects" on its own.
+        </p>
       </div>
 
       <div className="card section">
@@ -123,18 +126,8 @@ export default function Settings() {
             <span className={`chip ${a.approval === 'pending' ? 'high' : a.approval === 'approved' ? 'ok' : ''}`}>{a.approval}</span>
             {a.approval === 'pending' && (
               <>
-                <button
-                  className="btn small"
-                  onClick={async () => { await api.post(`/agent/actions/${a.id}/approve`); load(); }}
-                >
-                  Approve
-                </button>
-                <button
-                  className="btn small danger"
-                  onClick={async () => { await api.post(`/agent/actions/${a.id}/reject`); load(); }}
-                >
-                  Reject
-                </button>
+                <button className="btn small" onClick={async () => { await api.post(`/agent/actions/${a.id}/approve`); load(); }}>Approve</button>
+                <button className="btn small danger" onClick={async () => { await api.post(`/agent/actions/${a.id}/reject`); load(); }}>Reject</button>
               </>
             )}
           </div>
@@ -147,8 +140,12 @@ export default function Settings() {
           Purpose-based collection with configurable retention. Export everything, or delete it all.
         </p>
         <div style={{ display: 'flex', gap: 10 }}>
-          <button className="btn" onClick={exportData}>⬇ Export my data (JSON)</button>
-          <button className="btn danger" onClick={deleteAccount}>Delete account & data</button>
+          <button className="btn" onClick={exportData} disabled={exporting}>
+            {exporting ? 'Preparing…' : '⬇ Export my data (JSON)'}
+          </button>
+          <button className="btn danger" onClick={deleteAccount} disabled={deleting}>
+            {deleting ? 'Deleting…' : 'Delete account & data'}
+          </button>
         </div>
       </div>
     </>

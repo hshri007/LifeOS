@@ -13,10 +13,12 @@
   },
   "dependencies": {
     "@lifeos/types": "*",
+    "@types/nodemailer": "^8.0.1",
     "better-sqlite3": "9.6.0",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "multer": "^1.4.5-lts.1",
+    "nodemailer": "^9.0.5",
     "zod": "^3.23.8"
   },
   "devDependencies": {

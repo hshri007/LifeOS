@@ -11,11 +11,12 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import fs from 'node:fs';
 import { config } from './config';
-import { handleLogin, handleLogout, handleRegister } from './auth';
+import { handleDemoLogin, handleLogin, handleLogout, handleMe, handleRegister, handleResendOtp, handleVerifyOtp, requireAuth } from './auth';
 import { documentsRouter } from './routes/documents';
 import { obligationsRouter } from './routes/obligations';
 import { assistantRouter, agentRouter } from './routes/assistant';
 import { miscRouter } from './routes/misc';
+import { manageRouter } from './routes/manage';
 
 const app = express();
 app.disable('x-powered-by');
@@ -43,12 +44,17 @@ app.get('/api/health', (_req, res) => res.json({ ok: true, service: 'lifeos-api'
 app.post('/api/auth/register', handleRegister);
 app.post('/api/auth/login', handleLogin);
 app.post('/api/auth/logout', handleLogout);
+app.post('/api/auth/demo', handleDemoLogin);
+app.get('/api/auth/me', requireAuth, handleMe);
+app.post('/api/auth/verify-otp', requireAuth, handleVerifyOtp);
+app.post('/api/auth/resend-otp', requireAuth, handleResendOtp);
 
 app.use('/api/documents', documentsRouter);
 app.use('/api/obligations', obligationsRouter);
 app.use('/api/assistant', assistantRouter);
 app.use('/api/agent', agentRouter);
 app.use('/api', miscRouter);
+app.use('/api', manageRouter);
 
 /* --------------------------- static web UI -------------------------- */
 
