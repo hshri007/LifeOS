@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react';
-import { api, type ObligationRow } from '../api';
+import { api, toast, type ObligationRow } from '../api';
 
 type Tab = 'open' | 'all';
 
 export default function Obligations() {
   const [tab, setTab] = useState<Tab>('open');
-  const [rows, setRows] = useState<ObligationRow[]>([]);
+    const [rows, setRows] = useState<ObligationRow[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState('');
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<{ title: string; due_at: string; priority: string; recurrence: string; detail: string; type: string }>(
+    { title: '', due_at: '', priority: 'medium', recurrence: 'none', detail: '', type: 'notice' },
+  );
   const [form, setForm] = useState({ title: '', type: 'notice', due_at: '', priority: 'medium', recurrence: 'none', detail: '' });
 
   async function load() {
@@ -19,8 +23,43 @@ export default function Obligations() {
   }
   useEffect(() => { load(); }, [tab]);
 
-  async function act(id: string, action: string) {
+    async function act(id: string, action: string) {
     await api.patch(`/obligations/${id}`, { action });
+    load();
+  }
+
+  async function remove(id: string, title: string) {
+    if (!window.confirm(`Delete "${title}"? This removes the reminder permanently.`)) return;
+    await api.del(`/obligations/${id}`);
+    toast('Deleted');
+    load();
+  }
+
+  async function openEdit(o: ObligationRow) {
+    setEditId(o.id);
+    setEditForm({
+      title: o.title,
+      due_at: o.due_at.slice(0, 10),
+      priority: o.priority,
+      recurrence: o.recurrence,
+      detail: o.detail ?? '',
+      type: o.type,
+    });
+  }
+
+  async function saveEdit() {
+    if (!editId) return;
+    await api.patch(`/obligations/${editId}`, {
+      action: 'edit',
+      title: editForm.title,
+      due_at: new Date(editForm.due_at).toISOString(),
+      priority: editForm.priority,
+      recurrence: editForm.recurrence,
+      type: editForm.type,
+      detail: editForm.detail || undefined,
+    });
+    toast('Updated');
+    setEditId(null);
     load();
   }
 

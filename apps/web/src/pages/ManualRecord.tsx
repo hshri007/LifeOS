@@ -59,10 +59,13 @@ const CATEGORY_LABEL: Record<string, string> = {
   purchase_invoice: 'Purchase invoice', warranty: 'Warranty / AMC', travel: 'Trip', property: 'Property',
 };
 
+type Recurrence = 'none' | 'weekly' | 'monthly' | 'annual';
+
 export default function ManualRecord() {
   const [category, setCategory] = useState('vehicle');
   const [title, setTitle] = useState('');
   const [values, setValues] = useState<Record<string, string>>({});
+  const [recurrence, setRecurrence] = useState<Recurrence>('none');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<ManualResult | null>(null);
@@ -73,7 +76,9 @@ export default function ManualRecord() {
     setError('');
     setResult(null);
     try {
-      const res = await api.post<ManualResult>('/records/manual', { category, title, fields: values });
+      const res = await api.post<ManualResult>('/records/manual', {
+        category, title, fields: values, recurrence: recurrence === 'none' ? undefined : recurrence,
+      });
       setResult(res);
       toast(`Created ${res.obligations.length} reminder(s)`);
     } catch (err) {
@@ -88,7 +93,7 @@ export default function ManualRecord() {
   return (
     <>
       <h1 className="page-title">Add a record</h1>
-      <p className="page-sub">No document handy? Type the details directly — LifeOS creates the reminders for you (e.g. a PUC or insurance expiry).</p>
+      <p className="page-sub">No document handy? Type the details directly — LifeOS creates the reminders for you (e.g. a PUC or insurance expiry). Pick a recurrence so the reminder repeats automatically.</p>
 
       <div className="card section">
         <h3>What is it?</h3>
@@ -121,9 +126,22 @@ export default function ManualRecord() {
 
         {error && <div className="error-box">{error}</div>}
 
-        <button className="btn primary" style={{ marginTop: 16 }} disabled={busy}>
-          {busy ? 'Creating…' : 'Create reminders →'}
-        </button>
+        <div className="grid cols-2">
+          <div>
+            <label>Recurrence</label>
+            <select value={recurrence} onChange={(e) => setRecurrence(e.target.value as Recurrence)}>
+              <option value="none">One time</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="annual">Annual</option>
+            </select>
+          </div>
+          <div style={{ alignSelf: 'flex-end' }}>
+            <button className="btn primary" style={{ width: '100%' }} disabled={busy}>
+              {busy ? 'Creating…' : 'Create reminders →'}
+            </button>
+          </div>
+        </div>
       </form>
 
       {result && (
